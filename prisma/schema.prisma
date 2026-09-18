@@ -1,0 +1,191 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../app/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id            String    @id
+  name          String
+  email         String
+  emailVerified Boolean   @default(false)
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  sessions      Session[]
+  accounts      Account[]
+  repo          Repo[]
+
+  @@unique([email])
+  @@map("user")
+}
+
+model Session {
+  id        String   @id
+  expiresAt DateTime
+  token     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([token])
+  @@index([userId])
+  @@map("session")
+}
+
+model Account {
+  id                    String    @id
+  accountId             String
+  issuer                String?
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([userId])
+  @@map("account")
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+  @@map("verification")
+}
+
+
+
+enum RepoStatus {
+  PENDING
+  FETCHING
+  PARSING
+  EMBEDDING
+  SUMMARIZING
+  DONE
+  FAILED
+}
+
+enum EdgeType {
+  IMPORT
+  CALL
+}
+
+enum ChatRole {
+  USER
+  ASSISTANT
+}
+
+model Repo {
+  id              String        @id @default(cuid())
+  userId          String
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  githubUrl       String
+  owner           String
+  name            String
+  defaultBranch   String        @default("main")
+  isPrivate       Boolean       @default(false)
+  status          RepoStatus    @default(PENDING)
+  errorMessage    String?
+  fileCount       Int           @default(0)
+  totalSizeBytes  Int           @default(0)
+  moduleSummaries Json?
+  files           File[]
+  edges           Edge[]
+  chatMessages    ChatMessage[]
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  analyzedAt      DateTime?
+
+  @@unique([userId, githubUrl])
+  @@index([userId])
+  @@index([status])
+}
+
+model File {
+  id            String   @id @default(cuid())
+  repoId        String
+  repo          Repo     @relation(fields: [repoId], references: [id], onDelete: Cascade)
+  path          String
+  language      String?
+  sizeBytes     Int
+  summary       String?  @db.Text
+  functionCount Int      @default(0)
+  exportCount   Int      @default(0)
+  hasTestFile   Boolean  @default(false)
+  chunks        Chunk[]
+  edgesFrom     Edge[]   @relation("EdgeSource")
+  edgesTo       Edge[]   @relation("EdgeTarget")
+  createdAt     DateTime @default(now())
+
+  @@unique([repoId, path])
+  @@index([repoId])
+}
+
+model Chunk {
+  id           String                     @id @default(cuid())
+  fileId       String
+  file         File                       @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  content      String                     @db.Text
+  embedding    Unsupported("vector(768)")
+  functionName String?
+  startLine    Int
+  endLine      Int
+  createdAt    DateTime                   @default(now())
+
+  @@index([fileId])
+}
+
+model Edge {
+  id           String   @id @default(cuid())
+  repoId       String
+  repo         Repo     @relation(fields: [repoId], references: [id], onDelete: Cascade)
+  sourceFileId String
+  sourceFile   File     @relation("EdgeSource", fields: [sourceFileId], references: [id], onDelete: Cascade)
+  targetFileId String
+  targetFile   File     @relation("EdgeTarget", fields: [targetFileId], references: [id], onDelete: Cascade)
+  type         EdgeType @default(IMPORT)
+  isCircular   Boolean  @default(false)
+  createdAt    DateTime @default(now())
+
+  @@unique([sourceFileId, targetFileId, type])
+  @@index([repoId])
+  @@index([sourceFileId])
+  @@index([targetFileId])
+}
+
+model ChatMessage {
+  id           String   @id @default(cuid())
+  repoId       String
+  repo         Repo     @relation(fields: [repoId], references: [id], onDelete: Cascade)
+  userId       String?
+  role         ChatRole
+  content      String   @db.Text
+  citedFileIds Json?
+  createdAt    DateTime @default(now())
+
+  @@index([repoId, createdAt])
+}
