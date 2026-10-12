@@ -1,70 +1,62 @@
-// app/dashboard/page.tsx
-'use client'
-import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { auth } from "@/lib/auth"
+import { prisma } from "@/lib/prisma"
+import { headers } from "next/headers"
+import { redirect } from "next/navigation"
+import { AnalyzeForm } from "@/components/AnalyzeForm"
+import { RepoRow } from "@/components/RepoRow"
 
-export default function DashboardPage() {
-  const [input, setInputVal] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+export default async function DashboardPage() {
+  const session = await auth.api.getSession({ headers: await headers() })
+  if (!session) redirect("/")
 
-  const router = useRouter();
+  const repos = await prisma.repo.findMany({
+    where: { userId: session.user.id },
+    orderBy: { createdAt: "desc" },
+  })
 
-  async function handleAnalyze() {
-    if (!input.trim()) return;
+  const filesSummarized = await prisma.file.count({
+    where: { repo: { userId: session.user.id }, summary: { not: null } },
+  })
 
-    setIsLoading(true);
-    setError(null);
-
-    try {
-      const res = await fetch("/api/repos/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ githubUrl: input.trim() }),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        setError(data.error || "Something went wrong");
-        setIsLoading(false);
-        return;
-      }
-
-      router.push(`/repo/${data.repoId}`);
-      // note: not resetting isLoading here on purpose — the button
-      // stays disabled while the navigation transition happens,
-      // which prevents a double-click firing a second request
-    } catch (err) {
-      setError("Network error — check your connection and try again");
-      setIsLoading(false);
-    }
-  }
+  const questionsAsked = await prisma.chatMessage.count({
+    where: { repo: { userId: session.user.id }, role: "USER" },
+  })
 
   return (
-    <div className="flex flex-col justify-center items-center min-h-screen">
-      <div>Codebase Explorer</div>
-      <div>
-        Paste a repo. Get its architecture, file summaries and a chat that knows
-        the code.
+    <div className="max-w-4xl mx-auto px-6 py-10">
+      <p className="font-mono text-xs text-muted-foreground mb-5">
+        workspace / <b className="text-foreground">repositories</b>
+      </p>
+
+      <h1 className="font-serif text-4xl mb-2">Repositories</h1>
+      <p className="text-muted-foreground mb-6">Paste a GitHub link to map a new codebase.</p>
+
+      <AnalyzeForm />
+
+      <div className="grid grid-cols-3 gap-px bg-border border border-border rounded-lg overflow-hidden my-6">
+        <Stat value={repos.length} label="repos analyzed" />
+        <Stat value={filesSummarized} label="files summarized" />
+        <Stat value={questionsAsked} label="questions asked" />
       </div>
-      <div className="flex gap-2 mt-3">
-        <input
-          type="text"
-          placeholder="github.com/owner/repo"
-          onChange={(e) => setInputVal(e.target.value)}
-          value={input}
-          disabled={isLoading}
-        />
-        <button
-          className="border rounded-sm px-2"
-          onClick={handleAnalyze}
-          disabled={isLoading || !input.trim()}
-        >
-          {isLoading ? "Analyzing..." : "Analyze"}
-        </button>
+
+      <div className="grid gap-px bg-border border border-border rounded-lg overflow-hidden">
+        {repos.length === 0 ? (
+          <div className="bg-card p-8 text-center text-muted-foreground text-sm">
+            No repos yet — paste one above to get started.
+          </div>
+        ) : (
+          repos.map((repo) => <RepoRow key={repo.id} repo={repo} />)
+        )}
       </div>
-      {error && <div className="text-red-500 text-sm mt-2">{error}</div>}
     </div>
-  );
+  )
+}
+
+function Stat({ value, label }: { value: number; label: string }) {
+  return (
+    <div className="bg-card p-5">
+      <b className="font-serif text-3xl block">{value}</b>
+      <span className="text-muted-foreground text-sm">{label}</span>
+    </div>
+  )
 }
