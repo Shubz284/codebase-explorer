@@ -26,7 +26,7 @@ export async function fetchRepoTree(octokit: Octokit, owner: string, repo: strin
   return { branch, isPrivate: repoData.private, tree: treeData.tree }
 }
 
-const IGNORE_DIRS = ["node_modules", ".git", "dist", "build", ".next", "vendor", "coverage"]
+const IGNORE_DIRS = ["node_modules", ".windsurf",  ".git", "dist", "build", ".next", "vendor", "coverage", ".agent", ".claude", ".cursor"]
 const IGNORE_EXTENSIONS = [
   ".png", ".jpg", ".jpeg", ".svg", ".gif", ".ico", ".woff", ".woff2",
   ".lock", ".map", ".min.js",

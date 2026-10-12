@@ -1,5 +1,5 @@
 // app/api/repos/analyze/route.ts
-import { NextRequest } from "next/server"
+import { after, NextRequest } from "next/server"
 import { auth } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import {
@@ -9,6 +9,8 @@ import {
   guessLanguage,
 } from "@/lib/github"
 import { parseRepo } from "@/lib/pipeline/parse-repo"
+import { embedRepo } from "@/lib/pipeline/embed-repo"
+import { summarizeRepo } from "@/lib/pipeline/summarize-repo"
 
 export async function POST(req: NextRequest) {
   // 1. Auth check — safe to read the session here since this only runs server-side
@@ -37,6 +39,7 @@ export async function POST(req: NextRequest) {
   if (!account?.accessToken) {
     return Response.json({ error: "GitHub account not connected properly" }, { status: 400 })
   }
+  const accessToken = account.accessToken;
 
   // 4. Don't re-analyze a repo the user already has — matches the
   //    @@unique([userId, githubUrl]) in your schema
@@ -52,15 +55,17 @@ export async function POST(req: NextRequest) {
     data: { userId: session.user.id, githubUrl, owner, name, status: "FETCHING" },
   })
 
-  
-
+  // Part 1 — fast, stays inside the request: if the URL is bad or the repo
+  // doesn't exist, the user finds out in seconds instead of minutes
+  // Part 1 — fast, stays inside the request: if the URL is bad or the repo
+  // doesn't exist, the user finds out in seconds instead of minutes
   try {
-    const octokit = getOctokit(account.accessToken)
+    const octokit = getOctokit(accessToken)
     const { branch, isPrivate, tree } = await fetchRepoTree(octokit, owner, name)
-    const files = tree.filter(f => f.type === "blob" && shouldInclude(f.path!, f.size))
+    const files = tree.filter((f) => f.type === "blob" && shouldInclude(f.path!, f.size))
 
     await prisma.file.createMany({
-      data: files.map(f => ({
+      data: files.map((f) => ({
         repoId: repo.id,
         path: f.path!,
         sizeBytes: f.size ?? 0,
@@ -70,31 +75,39 @@ export async function POST(req: NextRequest) {
 
     await prisma.repo.update({
       where: { id: repo.id },
-      data: {
-        defaultBranch: branch,
-        isPrivate,
-        fileCount: files.length,
-      },
+      data: { defaultBranch: branch, isPrivate, fileCount: files.length },
     })
-
-    console.log("🚀 STARTING PARSE PIPELINE");
-
-    await parseRepo(
-      repo.id,
-      account.accessToken
-    );
-
-    console.log("✅ PARSE PIPELINE FINISHED");
-
-    return Response.json({ repoId: repo.id })
   } catch (err) {
-    // 5. If GitHub fails partway through, mark it FAILED instead of leaving
-    //    the row stuck on "FETCHING" forever — this is what your dashboard's
-    //    error state (from the mockup) actually reads.
-    await prisma.repo.update({
-      where: { id: repo.id },
-      data: { status: "FAILED", errorMessage: (err as Error).message },
-    })
+    console.error("FETCH FAILED:", err)
+    await prisma.repo
+      .update({
+        where: { id: repo.id },
+        data: { status: "FAILED", errorMessage: (err as Error).message },
+      })
+      .catch(() => {})
     return Response.json({ error: "Failed to fetch repo" }, { status: 500 })
   }
+
+  // Part 2 — slow, runs AFTER the response has been sent
+  after(async () => {
+    try {
+      await parseRepo(repo.id, accessToken)
+      await embedRepo(repo.id, accessToken)
+      await summarizeRepo(repo.id, accessToken)
+      await prisma.repo.update({
+        where: { id: repo.id },
+        data: { analyzedAt: new Date() },
+      })
+    } catch (err) {
+      console.error("PIPELINE FAILED:", err)
+      await prisma.repo
+        .update({
+          where: { id: repo.id },
+          data: { status: "FAILED", errorMessage: (err as Error).message },
+        })
+        .catch(() => {})
+    }
+  })
+
+  return Response.json({ repoId: repo.id })
 }

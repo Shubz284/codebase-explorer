@@ -205,16 +205,16 @@ for (const edgeKey of circularEdges) {
   });
 }
 
-// 13. Mark repository as done
-await prisma.repo.update({
-  where: {
-    id: repoId,
-  },
-  data: {
-    status: "DONE",
-    analyzedAt: new Date(),
-  },
-});
+// // 13. Mark repository as done
+// await prisma.repo.update({
+//   where: {
+//     id: repoId,
+//   },
+//   data: {
+//     status: "DONE",
+//     analyzedAt: new Date(),
+//   },
+// });
 
   return {
     filesParsed: results.filter(Boolean).length,

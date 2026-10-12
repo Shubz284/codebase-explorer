@@ -39,6 +39,11 @@ async function getParser(grammar: Grammar): Promise<Parser> {
   return parser;
 }
 
+export async function getTree(sourceCode: string, filePath: string) {
+  const parser = await getParser(pickGrammar(filePath));
+  return parser.parse(sourceCode);
+}
+
 export async function parseFile(sourceCode: string, filePath: string): Promise<ParseResult> {
   const parser = await getParser(pickGrammar(filePath));
   const tree = parser.parse(sourceCode);
